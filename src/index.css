@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  
+  --color-primary: #2563eb;
+  --color-primary-light: #eff6ff;
+  --color-bg-main: #f8fafc;
+  --color-sidebar: #ffffff;
+  --color-text-main: #1e293b;
+  --color-text-muted: #64748b;
+  --color-border-main: #e2e8f0;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+}
+
+@layer base {
+  body {
+    @apply bg-bg-main text-text-main font-sans antialiased;
+  }
+}
+
+@layer components {
+  .sleek-card {
+    @apply bg-white rounded-xl border border-border-main shadow-sm;
+  }
+  
+  .sleek-panel {
+    @apply bg-white rounded-xl border border-border-main overflow-hidden flex flex-col;
+  }
+  
+  .sleek-header {
+    @apply h-[70px] bg-white border-b border-border-main flex items-center justify-between px-8 sticky top-0 z-10;
+  }
+  
+  .sleek-sidebar {
+    @apply w-[240px] bg-sidebar border-r border-border-main flex flex-col h-screen sticky top-0;
+  }
+  
+  .sleek-nav-item {
+    @apply flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all mb-1;
+  }
+  
+  .sleek-nav-item-active {
+    @apply bg-primary-light text-primary;
+  }
+  
+  .sleek-nav-item-inactive {
+    @apply text-text-muted hover:bg-slate-50 hover:text-text-main;
+  }
+  
+  .sleek-stat-label {
+    @apply text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-2;
+  }
+  
+  .sleek-stat-value {
+    @apply text-2xl font-bold text-text-main;
+  }
+  
+  .sleek-table-th {
+    @apply text-left bg-bg-main px-5 py-3 text-[11px] font-bold text-text-muted uppercase tracking-wider border-b border-border-main;
+  }
+  
+  .sleek-table-td {
+    @apply px-5 py-4 border-b border-border-main text-sm;
+  }
+  
+  .sleek-pill {
+    @apply inline-block px-2 py-1 rounded-full font-bold text-[11px] uppercase tracking-wider;
+  }
+  
+  .sleek-pill-high { @apply bg-emerald-100 text-emerald-700; }
+  .sleek-pill-mid { @apply bg-amber-100 text-amber-700; }
+  .sleek-pill-low { @apply bg-red-100 text-red-700; }
+  
+  .sleek-progress-bg { @apply h-1.5 w-16 bg-slate-100 rounded-full overflow-hidden inline-block mr-2; }
+  .sleek-progress-fill { @apply h-full rounded-full bg-primary; }
+}
