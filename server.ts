@@ -175,8 +175,8 @@ async function startServer() {
   const db = await mysql.createConnection({
     host: process.env.MYSQL_HOST || 'localhost',
     user: process.env.MYSQL_USER || 'root',
-    password: process.env.MYSQL_PASSWORD || 'password',
-    database: process.env.MYSQL_DATABASE || 'hr_recruitment',
+    password: process.env.MYSQL_PASSWORD || 'rootroot',
+    database: process.env.MYSQL_DATABASE || 'hr_recruitmentdb',
     port: parseInt(process.env.MYSQL_PORT || '3306'),
   });
 
