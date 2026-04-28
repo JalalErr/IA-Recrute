@@ -10,16 +10,19 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
 import mysql from 'mysql2/promise';
-import { PDFParse } from 'pdf-parse';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pdf = require('pdf-parse');
 import mammoth from 'mammoth';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'hr-recruitment-secret-key';
 
-const OPENROUTER_API = 'https://openrouter.ai/api/v1/chat/completions';
+//const OPENROUTER_API = 'https://openrouter.ai/api/v1/chat/completions';
 
 type OpenRouterChatResponse = {
   choices?: Array<{ message?: { content?: string | null } }>;
 };
+
 
 /**
  * Token/cost guardrails
@@ -64,71 +67,44 @@ function getOpenRouterMaxTokens() {
   return clampInt(requested, OR_MAX_OUTPUT_TOKENS_MIN, OR_MAX_OUTPUT_TOKENS_MAX);
 }
 
-async function openRouterChatJson(userPrompt: string): Promise<string> {
-  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-  if (!apiKey) throw new Error('OPENROUTER_API_KEY is not set');
+// --- Logique IA Locale (Ollama + Llama 3) ---
 
-  const model =
-    process.env.OPENROUTER_MODEL?.trim() || 'google/gemini-2.0-flash-001';
-  const referer =
-    process.env.OPENROUTER_HTTP_REFERER?.trim() ||
-    process.env.APP_URL?.trim() ||
-    'http://localhost:3000';
-  const title =
-    process.env.OPENROUTER_APP_TITLE?.trim() || 'ai-recruit-pro';
-
-  const max_tokens = getOpenRouterMaxTokens();
-
-  // Defensive: prevent oversized requests (prompt + completion budget).
-  // If a caller accidentally passes a huge prompt, we fail fast instead of
-  // triggering expensive/unstable upstream errors.
-  const estPromptTokens = estimateTokensFromText(userPrompt);
-  const estTotal = estPromptTokens + max_tokens;
-  if (estTotal > OR_MAX_EST_TOTAL_TOKENS) {
-    throw new Error(
-      `Prompt too large for budget (est ${estTotal} tokens > ${OR_MAX_EST_TOTAL_TOKENS}). ` +
-        `Trim inputs or lower OPENROUTER_MAX_TOKENS.`,
-    );
-  }
-
-  const body: Record<string, unknown> = {
-    model,
-    messages: [{ role: 'user', content: userPrompt }],
-    max_tokens,
-    temperature: 0.2,
-  };
-  if (process.env.OPENROUTER_JSON_MODE === 'true') {
-    body.response_format = { type: 'json_object' };
-  }
-
-  const res = await fetch(OPENROUTER_API, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': referer,
-      'X-Title': title,
-    },
-    body: JSON.stringify(body),
-  });
-
-  const raw = await res.text();
-  if (!res.ok) {
-    throw new Error(`OpenRouter HTTP ${res.status}: ${raw.slice(0, 800)}`);
-  }
-
-  let data: OpenRouterChatResponse;
+async function localLlamaChatJson(userPrompt: string): Promise<string> {
+  const OLLAMA_API = "http://localhost:11434/api/chat";
+  
   try {
-    data = JSON.parse(raw) as OpenRouterChatResponse;
-  } catch {
-    throw new Error('OpenRouter returned invalid JSON');
-  }
+    const res = await fetch(OLLAMA_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "llama3.2:3b ",
+        messages: [
+          { 
+            role: "system", 
+            content: "You are an expert HR assistant. You must respond ONLY with a valid JSON object. No conversation, no markdown code blocks, just the raw JSON." 
+          },
+          { role: "user", content: userPrompt }
+        ],
+        stream: false,
+        format: "json", // Force le mode JSON sur Ollama
+        options: {
+          temperature: 0.1, // Basse pour plus de constance
+          num_ctx: 4096     // Fenêtre de contexte
+        }
+      })
+    });
 
-  const content = data.choices?.[0]?.message?.content;
-  if (typeof content !== 'string' || !content.trim()) {
-    throw new Error('OpenRouter returned empty content');
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(`Ollama Error ${res.status}: ${errorText}`);
+    }
+
+    const data = await res.json();
+    return data.message?.content || "";
+  } catch (error) {
+    console.error("Local AI Error:", error);
+    throw error;
   }
-  return content;
 }
 
 function buildCvScoringPrompt(args: {
@@ -303,25 +279,27 @@ async function startServer() {
       return res.status(400).json({ error: 'You have already applied for this job' });
     }
 
-    let extractedText = '';
+    let extractedText = ''; 
+
     try {
       if (file.mimetype === 'application/pdf') {
-        const parser = new PDFParse({ data: file.buffer });
-        try {
-          const textResult = await parser.getText();
-          extractedText = textResult.text;
-        } finally {
-          await parser.destroy();
-        }
+        // Avec require, 'pdf' est directement la fonction de parsing
+        const data = typeof pdf === 'function' ? pdf : (pdf.default || pdf);        
+        // On récupère le texte directement
+        extractedText = data.text || ''; 
+    
       } else if (file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
         const data = await mammoth.extractRawText({ buffer: file.buffer });
         extractedText = data.value;
       } else {
-        return res.status(400).json({ error: 'Unsupported file format. Please upload PDF or DOCX.' });
+        return res.status(400).json({ error: 'Format non supporté (PDF ou DOCX uniquement)' });
       }
-    } catch (parseError) {
+    } catch (parseError: any) {
       console.error('File parsing error:', parseError);
-      return res.status(500).json({ error: 'Failed to extract text from CV' });
+      return res.status(500).json({ 
+        error: 'Failed to extract text from CV', 
+        details: parseError.message 
+      });
     }
 
     // Save CV
@@ -349,19 +327,18 @@ async function startServer() {
     });
 
     try {
-      const text = await openRouterChatJson(prompt);
-      
-      // Clean up potential markdown code blocks
-      const jsonStr = text.replace(/```json\n?|\n?```/g, '').trim();
-      const analysis = JSON.parse(jsonStr);
-      
+      const rawResponse = await localLlamaChatJson(prompt);
+      // Nettoyage au cas où Llama ajoute des balises ```json
+      const cleanJson = rawResponse.replace(/```json\n?|\n?```/g, '').trim();
+      const analysis = JSON.parse(cleanJson);
+
       await db.execute('INSERT INTO applications (job_id, cv_id, user_id, score, analysis) VALUES (?, ?, ?, ?, ?)', 
         [jobId, cvId, userId, analysis.score || 0, JSON.stringify(analysis)]);
 
-      res.json({ message: 'Application submitted', analysis });
-    } catch (error) {
-      console.error('AI Error:', error);
-      res.status(500).json({ error: 'AI Analysis failed' });
+      res.json({ message: 'Candidature envoyée', analysis });
+    } catch (err) {
+      console.error("Analyse failed:", err);
+      res.status(500).json({ error: "L'IA locale n'a pas pu traiter le CV." });
     }
   });
 
